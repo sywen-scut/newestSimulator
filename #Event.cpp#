@@ -1,0 +1,984 @@
+#include "Event.h"
+#include <numeric>
+#include <time.h>
+using namespace std;
+
+static double threshold = 90;
+
+Event::Event(Application app) {//warning: havn't initialize shape yet
+	vector<Task> row = app.getTasks();
+	for (vector<Task>::iterator iter = row.begin(); iter != row.end(); ++iter)
+		{  
+		tasks.push_back(InvokedTask(*iter));
+		}
+	taskGraph = app.getTaskGraph();
+	arrivalTime = app.getArrivalTime();
+	taskNum = tasks.size();
+	id = app.getId();
+}
+
+bool Event::arrive(int now) {
+	if (arrivalTime == now) {
+		return true;
+	}
+	return false;
+}
+
+void Event::updateTaskGraph(){
+	
+	for (int i = 0; i < taskNum; i++) {
+		taskGraph[i] = tasks[i].unprocessedData();
+	}
+	
+}
+
+void Event::showTaskGraph()
+{
+	for (auto i : taskGraph) {
+		for (auto j : i) {
+			cout << j << '\t';
+		}
+		cout << endl;
+	}
+}
+
+bool Event::startRunning(Map* map,int type, Vertex point, int regsize) {
+	state = running;
+	startTime = Clock::getClock()->now();
+	if (mapping(map,type, point, regsize)) {
+		return true;	
+	}
+	// unhookFromMap(map);
+	return false;
+}
+	
+
+bool Event::mapping(Map* map, int type, Vertex point, int regsize) {
+	/*default : square contigous map*/
+	// Vertex pin = book(*map);
+	switch (type) {
+	
+	case 1:
+		return squareMapping(map,point);
+	case 2:
+		return chessMapping(map,point);
+	case 3:
+		return nonContigousMapping(map);
+	case 4:
+		return withBubbleMapping(map,point,regsize);
+	case 5:
+		return withBubbleMapping(map,point,regsize);
+	case 6:
+		return nonContigousMapping(map);
+	}
+}
+
+void Event::finish(Map* map) {
+	state = finished;
+	finishTime = Clock::getClock()->now();
+	unhookFromMap(map);
+}
+
+bool Event::ifFinished(vector<InvokedTask> tasks){
+	for (int i = 0; i < tasks.size();i++) {
+		if (tasks[i].checkState() != finished)
+			return false;
+		}
+		return true;
+}
+
+void Event::unhookFromMap(Map* map) {
+	for (int i = 0; i < taskNum;i++) {
+		if (tasks[i].checkState() != unmapped) {
+			map->turnOffCore(tasks[i].getLandlord());
+			tasks[i].release();
+		}
+	}
+	releaseRegion(map);
+	
+}
+
+
+void Event::nRound(Map* map) {
+	this->inst_cur = 0;
+	this->trans_cur = 0;
+	for (int i = 0; i < taskNum; i++) {/*for each task*/
+			InvokedTask* t_cur = &tasks[i];
+			Vertex v_cur = t_cur->getLandlord();
+		       	Core* c = map->getSpecificCore(v_cur);
+			double exe_speed = c->getFreq() * t_cur->getIpc();
+			vector<double> send;
+			vector<double> recieve;
+			vector<double> need = t_cur->unprocessedData();
+			for (int j = 0; j < taskNum; ++j)/*colunm*/
+			{
+				if (need[j]!=0)
+				{
+					int distance = tasks[j].getLandlord().Manhattan(t_cur->getLandlord());
+					if (need[j]>0) 
+					{
+						
+						recieve.push_back(1.0/distance);
+						send.push_back(0);
+						
+						
+					}
+					if(need[j]<0)
+					{
+						recieve.push_back(0);
+						send.push_back(1.0/distance);
+					}
+					
+				}
+				else{
+					send.push_back(0);
+					recieve.push_back(0);
+				}
+			}
+			bool tick = true;
+			vector<int> parent = t_cur->getParents();
+			State s = t_cur->checkState();
+			switch (s) {
+			case waiting:
+				c->turnOn_Processor();
+				if (parent.empty()) {
+					t_cur->setState(executing);
+				}
+				else {
+					tick = false;
+					for (auto pi : parent) {
+						if (tasks[pi].checkState() == tranfering) {
+							tick = true;
+						}
+					}
+					if (tick) {
+						t_cur->setState(receiving);
+					}
+				}
+				break;
+			case receiving:
+				c->turnOn_Processor();
+				c->turnOn_router();
+				for (int i = 0; i < taskNum; ++i)
+				{
+					if (tasks[i].checkState() == tranfering || tasks[i].checkState() == finished)
+					{
+						t_cur-> dataProcessed[i] += recieve[i];
+						// add to current trans vol
+						this->trans_cur += recieve[i];
+					}
+				}
+					t_cur->nRound(0, taskNum);
+				
+				break;
+			case executing:
+				c->turnOff_router();
+				c->turnOn_Processor();
+				t_cur ->executionVolumeFinished += exe_speed;
+				this->inst_cur += exe_speed;
+				t_cur->nRound(exe_speed, taskNum);
+				break;
+			case tranfering:
+				c->turnOn_Processor();
+				// c->turnOff_Processor();
+				c->turnOn_router();
+				for (int i = 0; i < taskNum; ++i)
+				{
+					t_cur-> dataProcessed[i] -= send[i];
+				}
+				t_cur->nRound(0,taskNum);
+				break;
+			case finished:
+				t_cur->nRound(0, taskNum);
+				c->turnOff_router();
+				c->turnOff_Processor();
+				break;
+			}	
+	}
+	updateTaskGraph();
+	
+	if (ifFinished(tasks)) {
+		finish(map);
+		
+		cout<<"APP "<<getId()<<" finished"<<endl;
+		cout<<" response time "<<finishTime - arrivalTime<<endl;
+		cout<<" waiting time: " << startTime - arrivalTime<<endl;
+		cout<<" execution time: " << finishTime - startTime<<endl;
+		cout<<" migratetimes: "<<migratetimes<<endl;
+		cout<<" migrate_distance: "<<migrate_distance<<endl;
+
+		// FILE* rfp = fopen("/home/chris/simulator/Result","a+");
+		// fprintf(rfp, "app%d\t", getId());
+		// fprintf(rfp, "response %d\t", finishTime - arrivalTime);
+		// fprintf(rfp, "wait %d\t", startTime - arrivalTime);
+		// fprintf(rfp, "exe %d\t", finishTime - startTime);
+		// fprintf(rfp, "migratetime %d\n", migratetimes);
+		// fclose(rfp);
+	}
+}
+
+bool Event::hasFinished() {
+	return state == State::finished;
+	/*finished or not*/
+}
+
+void Event::wait() {
+	state = waiting;
+}
+
+int Event::getArrivalTime() {
+	return arrivalTime;
+}
+
+int Event::getStartTime() {
+	return startTime;
+}
+
+int Event::getFinishTime() {
+	return finishTime;
+}
+
+int Event::getNumTasks() {
+	return  taskNum;
+}
+
+vector<InvokedTask> Event::getTasks() {
+	return tasks;
+}
+
+int Event::getId() {
+	return id;
+}
+
+void Event::swapTask(Map* map, int id1, int id2){
+		Vertex v1 = tasks[id1].getLandlord();
+		Vertex v2 = tasks[id2].getLandlord();
+		map->turnOffCore(v1);
+		tasks[id1].release();
+		map->turnOffCore(v2);
+		tasks[id2].release();
+		map->turnOnCore(tasks[id1], v2);
+		tasks[id1].continueRunning(v2);
+		map->turnOnCore(tasks[id2],v1);
+		tasks[id2].continueRunning(v1);
+}
+
+bool Event::setRegion(Map* map, Vertex point, int region_width, int region_length){
+
+	
+	if (point.w+region_width <= 8)
+		if (point.l + region_length <= 8)
+		{
+			Region r_tmp(point, region_width, region_length);
+			for (int j = r_tmp.start_p.l; j <= r_tmp.end_p.l; j++) {
+				for (int k = r_tmp.start_p.w; k <= r_tmp.end_p.w; k++) {
+					Vertex temp(j, k);
+					if(map->getSpecificCore(temp)->occupied)
+						return false;
+				}
+			}
+			this->region = r_tmp;
+			for (int j = this->region.start_p.l; j <= this->region.end_p.l; j++) {
+				for (int k = this->region.start_p.w; k <= this->region.end_p.w; k++) {
+					Vertex temp(j, k);
+					map->getSpecificCore(temp)->occupy();
+				}
+			}
+			return true;
+		}
+	return false;
+}
+
+void Event::releaseRegion(Map* map){
+	if (region.w > 0 && region.l > 0)
+	{
+		for (int j = region.start_p.l; j <= region.end_p.l; j++) {
+			for (int k = region.start_p.w; k <= region.end_p.w; k++) {
+					Vertex temp(j, k);
+					map->getSpecificCore(temp)->unoccupy();
+			}
+		}
+	}
+}
+
+bool Event::CASqA(Map* map){
+	int Rmax = floor(ceil(sqrt(tasks.size()))/2);
+	Vertex FN (region.start_p.l+Rmax, region.start_p.w + Rmax);
+	vector<InvokedTask> MAP;
+	queue<InvokedTask> MET;
+	vector<InvokedTask> UNM;
+	int tf_id;
+	double heaviest = 0;
+	for(auto t:tasks)
+	{
+		UNM.push_back(t);
+		double temp_weight = 0;
+		
+		for(auto edge:t.getWithNeibors())
+		{
+			temp_weight += fabs(edge);
+		}
+		if (temp_weight>=heaviest) {
+			heaviest = temp_weight;
+			tf_id = t.getId();
+		}	
+		
+	}
+	if (!map->getSpecificCore(FN)->active) 
+	{
+		map->turnOnCore(tasks[tf_id], FN);
+		tasks[tf_id].startRunning(FN);
+		MAP.push_back(tasks[tf_id]);
+		for (vector<InvokedTask>::iterator iter = UNM.begin(); iter != UNM.end();) 
+		{
+			if ((*iter).getId() == tf_id) {
+				iter = UNM.erase(iter);
+				break;
+			}
+			else {
+				iter++;
+			}
+		}
+	}
+	else
+		return false;
+
+	int MD=1;
+	int r=1;
+	
+	vector<int> neibour = tasks[tf_id].neibours;
+	for(auto p:neibour)
+	{
+		for (vector<InvokedTask>::iterator iter = UNM.begin(); iter != UNM.end();) 
+			{
+					if ((*iter).getId() == p) {
+						iter = UNM.erase(iter);
+						MET.push(*iter);
+					}
+					else {
+						iter++;
+					}
+			}	
+				
+	}
+	cout<<"METsize"<<MET.size()<<endl;
+	for(;r<=Rmax;r++){
+		for(; MD<=4*r;MD++){
+			InvokedTask tc = MET.front();
+			InvokedTask tp = tasks[tf_id];
+			for(auto tparent : MAP)
+			{
+				if(tc.getWithNeibors().at(tparent.getId())!=0)
+					tp = tparent;
+			}
+			for (int k = FN.w-r; k <= FN.w+r && k<=region.end_p.w; k++) {
+				for (int j = FN.l-r; j <= FN.l-r&& k<=region.end_p.l; j++) {
+					Vertex temp(j, k);
+					if (!map->getSpecificCore(temp)->active && temp.Manhattan(tasks[tp.getId()].getLandlord())==MD)
+					{
+						map->turnOnCore(tasks[tc.getId()], temp);
+						tasks.at(tc.getId()).startRunning(temp);
+						MET.pop();
+						MAP.push_back(tc);
+						for(auto p:tc.neibours)
+						{
+							for (vector<InvokedTask>::iterator iter = UNM.begin(); iter != UNM.end();) 
+								{
+									if ((*iter).getId() == p) {
+										iter = UNM.erase(iter);
+										MET.push(*iter);
+									}
+									else {
+										iter++;
+									}
+								}	
+								
+						}
+						//we could further add ICEB evaluation here
+					}
+					if(tasks[tc.getId()].getLandlord().w != -1)
+						break;
+				}if(tasks[tc.getId()].getLandlord().w != -1)
+						break;
+			}if(tasks[tc.getId()].getLandlord().w != -1)
+						break;
+		}if(MAP.size() == tasks.size())
+			break;	
+	}
+	if (MAP.size() != tasks.size()) {
+		/*unhook map*/
+		unhookFromMap(map);
+		cout<<" map failed" <<endl;
+		return false;
+	}
+	else
+		return true;	
+}
+
+bool Event::squareMapping(Map* map, Vertex point){
+	int size = tasks.size();
+	int region_length = floor(sqrt(size));
+	int region_width = 2*ceil(sqrt(size));
+	int count = 0;
+	if (!setRegion(map, point, region_width, region_length))
+	{
+		return false;
+	}
+	Vertex top_right_p(region.start_p.l,region.end_p.w);
+	if (map->getSpecificCore(region.end_p)->active||map->getSpecificCore(top_right_p)->active)
+	{
+		return false;
+	}
+	cout<<"squaremap: "<<region.w<<"*"<<region.w<<endl;	
+		
+	// 	for (int k = region.start_p.w; k <= region.end_p.w; k++) {
+	// 		for (int j = region.start_p.l; j <= region.end_p.l; j++) {
+	// 			Vertex temp(j, k);
+	// 			if (!map->getSpecificCore(temp)->active) {
+	// 				map->turnOnCore(tasks[count], temp);
+	// 				tasks.at(count).startRunning(temp);
+	// 				count++;
+       
+	// 				//map one more task 	
+	// 			}if(count == tasks.size())
+	// 			   break;
+	// 		}if(count == tasks.size())
+	// 		   break;
+	// 	}
+		
+
+	// if (count == tasks.size()) {
+	// 	//Adjust for star shape application
+	// 	int mtid = floor(size/2);
+	// 	swapTask(map, 0,mtid);
+	// 	return true;
+	// 	//all tasks have been mapped already
+	// }
+	// else {/*unhook map*/
+	// 	unhookFromMap(map);
+	// 	cout<<" map failed" <<endl;
+	// 	return false;
+	// }
+	if(CASqA(map))
+		return true;
+	else
+		return false;
+} 
+
+bool Event::chessMapping(Map* map, Vertex point){
+	int size = tasks.size();
+	int region_width = 2*ceil(sqrt(size));
+	int region_length = floor(sqrt(size));
+	int count = 0;
+	if (!setRegion(map, point, region_width, region_length))
+	{
+		return false;
+	}
+	Vertex top_right_p(region.start_p.l,region.end_p.w);
+	if (map->getSpecificCore(region.start_p)->active||map->getSpecificCore(region.end_p)->active||map->getSpecificCore(top_right_p)->active)
+	{
+		return false;
+	}
+	cout<<"Chessmap: "<<region.w<<"*"<<region.l<<endl;
+		for (int j = region.start_p.l; j <= region.end_p.l; j++) {
+			if (j%2 == 0){
+				for (int k = region.start_p.w; k <= region.end_p.w; k+=2) {
+					Vertex temp(j, k);
+					if (!map->getSpecificCore(temp)->active) {
+						map->turnOnCore(tasks[count], temp);
+						tasks.at(count).startRunning(temp);
+						count++;
+						//map one more task 	
+					}if(count == tasks.size())
+							break;
+				}
+			}
+			else{
+				for (int k = region.start_p.w + 1; k <= region.end_p.w; k+=2) {
+					Vertex temp(j, k);
+					if (!map->getSpecificCore(temp)->active) {
+						map->turnOnCore(tasks[count], temp);
+						tasks.at(count).startRunning(temp);
+						count++;
+						//map one more task 	
+					}if(count == tasks.size())
+							break;
+				}
+			}
+			if(count == tasks.size())
+				break;
+
+		}
+	if (count == tasks.size()) {
+		//Adjust for star shape application
+		int mtid = floor(size/2);
+		swapTask(map, 0,mtid);
+
+		return true;
+		//all tasks have benn mapped already
+	}
+	else {/*unhook map*/
+		unhookFromMap(map);
+		cout<<" map failed" <<endl;
+		return false;
+		}
+}
+bool Event::nonContigousMapping(Map* map){
+	int count = 0;
+		for (int j =0; j < map->getLength(); j++) {
+			for (int k =0; k < map->getWidth(); k++) {
+				Vertex temp(j, k);
+				if (!map->getSpecificCore(temp)->active) {
+					map->turnOnCore(tasks[count], temp);
+					tasks.at(count).startRunning(temp);
+					count++;
+       
+					//map one more task 	
+				}if(count == tasks.size())
+				   break;
+			}if(count == tasks.size())
+			   break;
+		}
+	if (count == tasks.size()) {
+		return true;
+		//all tasks have benn mapped already
+	}
+	else {/*unhook map*/
+		unhookFromMap(map);
+		// cout<<" map failed" <<endl;
+		return false;
+	}
+}
+bool Event::squareMigration(Map* map){
+	int current_location = tasks[1].getLandlord().w;
+	/*turn off active cores*/
+	for (int i = 0; i < tasks.size();i++) {
+				if (tasks[i].checkState() != unmapped) 
+		map->turnOffCore(tasks[i].getLandlord());
+				tasks[i].release();
+				
+	}
+	/*Remapping*/
+	int count = 0;
+	cout<<"do Square Migration for app"<<getId()<<endl;
+	int j=0;
+	if (current_location == 0)
+		/*move to right*/
+		j = ceil(sqrt(tasks.size())); 
+	else/*move to left*/
+		j = 0 ;
+	for (; j <= region.end_p.w; j++) {
+			for (int k = region.start_p.l; k <= region.end_p.l; k++) {
+				Vertex temp(k, j);
+				if (!map->getSpecificCore(temp)->active) {
+					map->turnOnCore(tasks[count], temp);
+					tasks.at(count).continueRunning(temp);
+					count++;
+       
+					//map one more task 	
+				}if(count == tasks.size())
+				   break;
+			}if(count == tasks.size())
+			   break;
+		}
+		
+
+	if (count == tasks.size()) {
+		migratetimes++;
+		//Adjust for star shape application
+		int mtid = floor(tasks.size()/2);
+		swapTask(map, 0 ,mtid);
+		return true;
+		//all tasks have been mapped already
+	}
+	else {/*unhook map*/
+		unhookFromMap(map);
+		cout<<" migration failed" <<endl;
+		return false;
+	}
+	
+}
+
+bool Event::chessMigration(Map* map){
+	int current_location = tasks[1].getLandlord().w;
+	/*turn off active cores*/
+	for (int i = 0; i < tasks.size();i++) {
+				if (tasks[i].checkState() != unmapped) {
+				map->turnOffCore(tasks[i].getLandlord());
+				tasks[i].release();
+			}
+	}	
+
+	int count = 0;
+	int jplus = 0;
+	if (current_location == 2)
+	{
+		jplus = 1;
+		// cout<<"Right shift for first line"<<endl;
+	}
+	else
+	{
+		jplus = 0;
+		// cout<<"Left shift for first line"<<endl;
+	}
+	cout<<"do chessMigration for app"<<getId()<<endl;
+	for (int j = region.start_p.l; j <= region.end_p.l; j++) {
+			if ((j +jplus) %2 == 0){
+				for (int k = region.start_p.w; k <= region.end_p.w; k+=2) {
+					Vertex temp(j, k);
+					if (!map->getSpecificCore(temp)->active) {
+						map->turnOnCore(tasks[count], temp);
+						tasks.at(count).continueRunning(temp);
+						count++;
+						//map one more task 	
+					}if(count == tasks.size())
+							break;
+				}
+			}
+			else{
+				for (int k = region.start_p.w + 1; k <= region.end_p.w; k+=2) {
+					Vertex temp(j, k);
+					if (!map->getSpecificCore(temp)->active) {
+						map->turnOnCore(tasks[count], temp);
+						tasks.at(count).continueRunning(temp);
+						count++;
+						//map one more task 	
+					}if(count == tasks.size())
+							break;
+				}
+			}
+			if(count == tasks.size())
+				break;
+
+		}
+	if (count == tasks.size()) {
+		migratetimes++;
+		int mtid = floor(tasks.size()/2);
+		swapTask(map, 0 ,mtid);
+		return true;
+		//all tasks have benn mapped already
+	}
+	else {/*unhook map*/
+		unhookFromMap(map);
+		cout<<" migration failed" <<endl;
+		return false;
+		}
+}
+
+bool Event::globalColdest(Map* map, vector<int> hot_tid){
+	/*Find coolest core and migrate*/
+	cout<<"do GlobalColdest Migration for app"<<getId()<<endl;
+	double coldest_tmp = threshold;
+	Vertex  previous_vertex;
+	Vertex coldest_vertex;
+	for (auto tid : hot_tid) {
+		// cout <<"Hot task:"<<tid<<endl;
+		previous_vertex = tasks[tid].getLandlord();
+		map->turnOffCore(tasks[tid].getLandlord());
+		tasks[tid].release();
+		for(int k = 0; k < map->getLength(); k++) {
+			for (int j = 0; j < map-> getWidth(); j++) {
+				Vertex temp(k, j);
+				if(map->getSpecificCore(temp)->getTaskId() == -1){
+					double tmp_cur = map->getSpecificCore(temp)->temperture;
+					if ( tmp_cur < coldest_tmp)
+					{
+						coldest_tmp = tmp_cur;
+						coldest_vertex = temp;
+					}
+				}
+			}
+		}
+		if (coldest_vertex.w == -1)
+		{
+			/*decrease the frequency, nowhere to migrate*/
+			map->turnOnCore(tasks[tid], previous_vertex);
+			map->getSpecificCore(previous_vertex)->setFreq(0.5);
+			tasks[tid].continueRunning(previous_vertex);
+			// cout<<"decrease the frequency, nowhere to migrate"<<endl;
+		}
+		else{
+			/*add cost to total migrate distance*/
+			migrate_distance += coldest_vertex.Manhattan(previous_vertex);
+			map->turnOnCore(tasks[tid], coldest_vertex);
+			map->getSpecificCore(coldest_vertex)->setFreq(1);
+			tasks[tid].continueRunning(coldest_vertex);
+			// cout<<"migrate to dark core"<<endl;
+			coldest_tmp = threshold;/*Find next coldest core*/
+			coldest_vertex.w = -1;
+		}
+		
+	}	
+	migratetimes++;		
+	return true;
+}
+
+bool Event::neighborCol(Map* map, vector<int> hot_tid){
+	/*Find adjacent coolest core and migrate*/
+	cout<<"do neighborCol Migration for app"<<getId()<<endl;
+	double coldest_tmp = threshold -10;
+	Vertex  previous_vertex;
+	Vertex coldest_vertex;
+	for (auto tid : hot_tid) {
+		// cout <<"Hot task:"<<tid<<endl;
+		previous_vertex = tasks[tid].getLandlord();
+		map->turnOffCore(tasks[tid].getLandlord());
+		tasks[tid].release();
+		for(int k = previous_vertex.l-1; k <= previous_vertex.l+1; k++) {
+			for (int j = previous_vertex.w-1; j <= previous_vertex.w+1; j++) {
+				if(k >= 0 && k <8 && j >=0 && j<8)
+				{	
+					Vertex temp(k, j);
+					if(!map->getSpecificCore(temp)->occupied){
+						double tmp_cur = map->getSpecificCore(temp)->temperture;
+						if ( tmp_cur < coldest_tmp)
+						{
+							coldest_tmp = tmp_cur;
+							coldest_vertex = temp;
+						}
+					}
+				}
+			}
+		}
+		if (coldest_vertex.w == -1)
+		{
+			/*decrease the frequency, nowhere to migrate*/
+			map->turnOnCore(tasks[tid], previous_vertex);
+			map->getSpecificCore(previous_vertex)->setFreq(0.5);
+			tasks[tid].continueRunning(previous_vertex);
+			// cout<<"decrease the frequency, nowhere to migrate"<<endl;
+		}
+		else{
+			/*add cost to total migrate distance*/
+			migrate_distance += coldest_vertex.Manhattan(previous_vertex);
+			map->turnOnCore(tasks[tid], coldest_vertex);
+			map->getSpecificCore(coldest_vertex)->setFreq(1);
+			map->getSpecificCore(coldest_vertex)->occupy();
+			tasks[tid].continueRunning(coldest_vertex);
+			// cout<<"migrate to dark core"<<endl;
+			coldest_tmp = threshold -10;/*Find next coldest core*/
+			coldest_vertex.w = -1;
+		}
+		
+	}
+		
+	migratetimes++;		
+	return true;
+}
+
+bool Event::withBubbleMapping(Map* map, Vertex point, int regsize){
+	int size = tasks.size();
+	int region_width;
+	int region_length;
+	
+	switch (regsize)
+	{
+		case 8:
+			region_width = 4;
+			region_length =2;
+			break;
+		case 9:
+			region_width = 3;
+			region_length = 3;
+			if (point.w ==6)
+			{
+				region_width=2;
+				region_length=6;
+			}
+			if (point.l == 6)
+			{
+				region_width=8;
+				region_length=2;
+			}
+			break;
+		case 10:
+			region_width = 5;
+			region_length = 2;
+			if (point.w ==5)
+			{
+				region_width=3;
+				region_length=4;
+			}
+			break;
+		case 12:
+			region_width = 6;
+			region_length = 2;
+			if (point.l == 6)
+			{
+				region_width=8;
+				region_length=2;
+			}
+			break;
+		case 14:
+			region_width = 7;
+			region_length = 2;
+			break;
+		case 15:
+			region_width = 5;
+			region_length = 3;
+			if (point.w ==5)
+			{
+				region_width=3;
+				region_length=5;
+			}
+			if (point.l == 6)
+			{
+				region_width=8;
+				region_length=2;
+			}
+			break;
+		case 16:
+			region_width = 4;
+			region_length = 4;
+			break;
+		case 18:
+			region_width = 3;
+			region_length = 6;
+			break;
+		case 20:
+			region_width = 5;
+			region_length = 4;
+			if (point.w ==5)
+			{
+				region_width=3;
+				region_length=8;
+			}
+			break;
+		case 21:
+			region_width = 7;
+			region_length = 3;
+			break;
+		case 24:
+			region_width = 6;
+			region_length = 4;
+			break;
+		case 25:
+			region_width = 5;
+			region_length = 5;
+			break;
+		case 28:
+			region_width = 7;
+			region_length = 4;
+			break;
+		case 30:
+			region_width = 6;
+			region_length = 5;
+			break;
+		case 32:
+			region_width = 4;
+			region_length = 8;
+			break;
+		case 35:
+			region_width = 7;
+			region_length = 5;
+			break;
+		case 40:
+			region_width = 8;
+			region_length = 5;
+			break;
+		default:
+			break;
+	}
+	int count = 0;
+	if (!setRegion(map, point, region_width, region_length))
+	{
+		return false;
+	}
+
+	Vertex top_right_p(region.start_p.l,region.end_p.w);
+	if (map->getSpecificCore(region.end_p)->active||map->getSpecificCore(top_right_p)->active)
+	{
+		return false;
+	}
+	cout<<"Region: "<<region.w<<"*"<<region.l<<endl;	
+		for (int j = region.start_p.l; j <= region.end_p.l; j++) {
+			for (int k = region.start_p.w; k <= region.end_p.w; k++) {
+				Vertex temp(j, k);
+				Core* c = map->getSpecificCore(temp);
+				if (!c->active) {
+					map->turnOnCore(tasks[count], temp);
+					tasks.at(count).startRunning(temp);
+					c->setFreq(c->getFreq()+(region.area - taskNum)/(taskNum*3));
+					count++;
+       
+					//map one more task 	
+				}if(count == tasks.size())
+				   break;
+			}if(count == tasks.size())
+			   break;
+		}
+		
+
+	if (count == tasks.size()) {
+		return true;
+		//all tasks have been mapped already
+	}
+	else {/*unhook map*/
+		unhookFromMap(map);
+		cout<<" map failed" <<endl;
+		return false;
+	}
+} 
+
+bool Event::localColdest(Map* map, vector<int> hot_tid){
+	/*Find coolest core and migrate*/
+	cout<<"do local Dark Migration for app"<<getId()<<endl;
+	double coldest_tmp = threshold;
+	Vertex  previous_vertex;
+	Vertex coldest_vertex;
+	for (auto tid : hot_tid) {
+		// cout <<"Hot task:"<<tid<<endl;
+		previous_vertex = tasks[tid].getLandlord();
+		map->turnOffCore(tasks[tid].getLandlord());
+		tasks[tid].release();
+		for(int j = region.start_p.l; j <= region.end_p.l; j++) {
+			for (int k = region.start_p.w; k <= region.end_p.w; k++){
+				// if (!(k==4 && (j==2|| j==3)))
+				// {
+					/* add 2 more bubbles */
+				
+				Vertex temp(j, k);
+				if(map->getSpecificCore(temp)->getTaskId() == -1){
+					double tmp_cur = map->getSpecificCore(temp)->temperture;
+					if ( tmp_cur < coldest_tmp)
+					{
+						coldest_tmp = tmp_cur;
+						coldest_vertex = temp;
+					}
+				}
+				// }
+			}
+		}
+
+		if (coldest_vertex.w == -1)
+		{
+			/*decrease the frequency, nowhere to migrate*/
+			map->turnOnCore(tasks[tid], previous_vertex);
+			map->getSpecificCore(previous_vertex)->setFreq(0.5);
+			// cout<<"decrease the frequency, nowhere to migrate"<<endl;
+			tasks[tid].continueRunning(previous_vertex);
+		}
+		else{
+			/*add cost to total migrate distance*/
+			migrate_distance += coldest_vertex.Manhattan(previous_vertex);
+			map->turnOnCore(tasks[tid], coldest_vertex);
+			tasks[tid].continueRunning(coldest_vertex);
+			// cout<<"migrate to dark core"<<endl;
+			map->getSpecificCore(coldest_vertex)->setFreq(1+(region.area - taskNum)/(taskNum*3));
+			coldest_tmp = threshold;/*Find next coldest core*/
+			coldest_vertex.w = -1;
+		}
+		
+	}	
+	migratetimes++;		
+	return true;
+}
+
+bool Event::dvfs(Map* map, vector<int> hot_tid){
+	cout<<"do dvfs for app"<<getId()<<endl;
+	for (auto tid : hot_tid) {
+		cout <<"Hot task:"<<tid<<endl;
+		map->getSpecificCore(tasks[tid].getLandlord())->setFreq(0.5);
+	}
+	return true;
+}

@@ -1,0 +1,4 @@
+appid: 1	waiting: 0	execution: 12867
+appid: 2	waiting: 12868	execution: 20374
+appid: 3	waiting: 33243	execution: 23989
+type: 6	meanIPS: 1.666616	RT: 57233

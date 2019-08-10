@@ -1,0 +1,8 @@
+appid: 0	waiting: 0	execution: 30298
+type: 4	meanIPS: 1.653101	RT: 30299
+appid: 1	waiting: 0	execution: 10628
+type: 4	meanIPS: 2.219532	RT: 10629
+appid: 2	waiting: 0	execution: 17343
+type: 4	meanIPS: 1.906501	RT: 17344
+appid: 3	waiting: 0	execution: 19406
+type: 4	meanIPS: 2.002259	RT: 19407

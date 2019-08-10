@@ -1,0 +1,13 @@
+appid: 1	waiting: 0	execution: 2294
+appid: 3	waiting: 0	execution: 2400
+appid: 2	waiting: 0	execution: 3508
+appid: 0	waiting: 0	execution: 4495
+appid: 5	waiting: 1901	execution: 3605
+appid: 7	waiting: 3996	execution: 2411
+appid: 6	waiting: 3009	execution: 3605
+appid: 4	waiting: 1795	execution: 5162
+appid: 10	waiting: 6115	execution: 3207
+appid: 11	waiting: 6458	execution: 4315
+appid: 9	waiting: 5908	execution: 4943
+appid: 8	waiting: 5007	execution: 7465
+type: 4	meanIPS: 6.288679	RT: 13473

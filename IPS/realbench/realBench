@@ -1,0 +1,12 @@
+type: 4	meanIPS: 1.992036	RT: 47948	10
+type: 4	meanIPS: 2.423384	RT: 2512	12
+type: 4	meanIPS: 2.404270	RT: 2073	14
+type: 3	meanIPS: 1.660768	RT: 57434	10
+type: 3	meanIPS: 1.568419	RT: 3850	12
+type: 3	meanIPS: 1.714714	RT: 3675	14
+type: 6	meanIPS: 1.666616	RT: 57233	10
+type: 6	meanIPS: 1.753816	RT: 3450	12
+type: 6	meanIPS: 1.644991	RT: 2905	14
+type: 5	meanIPS: 0.936302	RT: 101044	10
+type: 5	meanIPS: 0.909410	RT: 4846	12
+type: 5	meanIPS: 1.480503	RT: 4095	14

@@ -1,0 +1,17 @@
+﻿type: 4	meanIPS: 7.461651	RT: 6427	50
+type: 4	meanIPS: 7.131500	RT: 7545	100
+type: 4	meanIPS: 6.655383	RT: 8964	150
+type: 4	meanIPS: 6.438776	RT: 10172	200
+type: 3	meanIPS: 6.119890	RT: 9402	50
+type: 3	meanIPS: 5.394552	RT: 10339	100
+type: 3	meanIPS: 4.692736	RT: 12692	150
+type: 3	meanIPS: 4.420675	RT: 14796	200
+type: 6	meanIPS: 5.090354	RT: 7820	50
+type: 6	meanIPS: 5.194761	RT: 9956	100
+type: 6	meanIPS: 4.969402	RT: 11986	150
+type: 6	meanIPS: 4.500766	RT: 14532	200
+type: 5	meanIPS: 3.663949	RT: 13064	50
+type: 5	meanIPS: 3.802044	RT: 14126	100
+type: 5	meanIPS: 3.922379	RT: 15187	150
+type: 5	meanIPS: 4.025854	RT: 16245	200
+
